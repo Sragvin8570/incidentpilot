@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: incidentpilot-demo-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: incidentpilot.demo
+      rules:
+        - alert: IncidentPilotPodCrashLooping
+          expr: kube_pod_container_status_restarts_total{namespace="dev"} >= 3
+          for: 30s
+          labels:
+            severity: warning
+            team: incidentpilot
+          annotations:
+            summary: A pod in the dev namespace is crash looping
+            description: Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted at least three times.

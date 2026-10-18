@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    incidentpilot.io/environment: dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    incidentpilot.io/environment: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    incidentpilot.io/environment: production
+

@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentpilot-demo
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: incidentpilot-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: incidentpilot-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: incidentpilot-demo
+    spec:
+      containers:
+        - name: demo
+          image: incidentpilot-demo:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentpilot-demo
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: incidentpilot-demo
+spec:
+  selector:
+    app.kubernetes.io/name: incidentpilot-demo
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentpilot-demo
+  namespace: prod
+  labels:
+    app.kubernetes.io/name: incidentpilot-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: incidentpilot-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: incidentpilot-demo
+    spec:
+      containers:
+        - name: demo
+          image: incidentpilot-demo:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentpilot-demo
+  namespace: prod
+  labels:
+    app.kubernetes.io/name: incidentpilot-demo
+spec:
+  selector:
+    app.kubernetes.io/name: incidentpilot-demo
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+

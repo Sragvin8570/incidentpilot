@@ -1,0 +1,31 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: incidentpilot
+  namespace: monitoring
+  labels:
+    incidentpilot.io/alertmanager-config: "true"
+spec:
+  route:
+    receiver: incidentpilot-webhook
+    matchers:
+      - name: team
+        value: incidentpilot
+        matchType: "="
+    groupBy:
+      - alertname
+      - namespace
+    groupWait: 10s
+    groupInterval: 30s
+    repeatInterval: 4h
+  receivers:
+    - name: incidentpilot-webhook
+      webhookConfigs:
+        - url: http://host.docker.internal:8000/api/v1/webhooks/alertmanager
+          sendResolved: true
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: incidentpilot-alertmanager-webhook-token
+                key: token

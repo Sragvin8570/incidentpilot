@@ -1,0 +1,18 @@
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleNamespaceSelector: {}
+
+alertmanager:
+  alertmanagerSpec:
+    alertmanagerConfigMatcherStrategy:
+      # Allow the team-labeled config to receive alerts from namespaces such as dev.
+      type: None
+    alertmanagerConfigSelector:
+      matchLabels:
+        incidentpilot.io/alertmanager-config: "true"
+    alertmanagerConfigNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
