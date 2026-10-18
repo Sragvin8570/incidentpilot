@@ -1,0 +1,30 @@
+id: increase_memory_limit
+risk_level: medium
+applies_to_kinds:
+  - Deployment
+parameters:
+  type: object
+  additionalProperties: false
+  required: [namespace, name, container]
+  properties:
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    name:
+      type: string
+      minLength: 1
+      maxLength: 253
+      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    container:
+      type: string
+      minLength: 1
+      maxLength: 253
+    factor:
+      type: number
+      minimum: 1.25
+      maximum: 2.0
+bounds:
+  maximum_factor: 2.0
+  request_adjustment: only_if_request_would_exceed_new_limit

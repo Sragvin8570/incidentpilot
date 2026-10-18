@@ -1,0 +1,24 @@
+id: rollback_deployment
+risk_level: medium
+applies_to_kinds:
+  - Deployment
+parameters:
+  type: object
+  additionalProperties: false
+  required: [namespace, name]
+  properties:
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    name:
+      type: string
+      minLength: 1
+      maxLength: 253
+      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    to_revision:
+      type: integer
+      minimum: 1
+bounds:
+  target: Previous known-good Deployment revision only.

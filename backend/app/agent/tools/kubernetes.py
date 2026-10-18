@@ -50,6 +50,10 @@ class NodeArgs(BaseModel):
     node: str = Field(min_length=1, max_length=253, pattern=_KUBERNETES_NAME)
 
 
+class PVCArgs(NamespacedResource):
+    pass
+
+
 def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -58,6 +62,7 @@ class KubernetesEvidenceTools:
     def __init__(self) -> None:
         self._core: client.CoreV1Api | None = None
         self._apps: client.AppsV1Api | None = None
+        self._storage: client.StorageV1Api | None = None
 
     def registry(self) -> ToolRegistry:
         return ToolRegistry(
@@ -98,11 +103,21 @@ class KubernetesEvidenceTools:
                     NodeArgs,
                     self.get_node_status,
                 ),
+                Tool(
+                    "get_pvc_status",
+                    "Read a PersistentVolumeClaim's phase, requested and current capacity, and StorageClass expansion support.",
+                    PVCArgs,
+                    self.get_pvc_status,
+                ),
             ]
         )
 
     def _ensure_clients(self) -> None:
-        if self._core is not None and self._apps is not None:
+        if (
+            self._core is not None
+            and self._apps is not None
+            and self._storage is not None
+        ):
             return
         try:
             config.load_incluster_config()
@@ -115,6 +130,7 @@ class KubernetesEvidenceTools:
                 ) from error
         self._core = client.CoreV1Api()
         self._apps = client.AppsV1Api()
+        self._storage = client.StorageV1Api()
 
     async def _run(
         self,
@@ -309,7 +325,11 @@ class KubernetesEvidenceTools:
                 }
             )
         revisions.sort(key=lambda item: int(item["revision"] or 0), reverse=True)
-        return {"deployment": name, "revisions": revisions[:20]}
+        return {
+            "deployment": name,
+            "namespace": namespace,
+            "revisions": revisions[:20],
+        }
 
     async def get_rollout_history(self, args: DeploymentArgs) -> dict:
         return await self._run(
@@ -337,3 +357,31 @@ class KubernetesEvidenceTools:
 
     async def get_node_status(self, args: NodeArgs) -> dict:
         return await self._run(self._node_status, args.node)
+
+    def _pvc_status(self, namespace: str, name: str) -> dict:
+        self._ensure_clients()
+        assert self._core is not None
+        assert self._storage is not None
+        pvc = self._core.read_namespaced_persistent_volume_claim(name, namespace)
+        storage_class_name = pvc.spec.storage_class_name
+        storage_class = (
+            self._storage.read_storage_class(storage_class_name)
+            if storage_class_name
+            else None
+        )
+        return {
+            "name": pvc.metadata.name,
+            "namespace": pvc.metadata.namespace,
+            "phase": pvc.status.phase,
+            "capacity": pvc.status.capacity or {},
+            "requested": pvc.spec.resources.requests or {},
+            "storage_class": storage_class_name,
+            "allow_volume_expansion": (
+                storage_class.allow_volume_expansion
+                if storage_class is not None
+                else False
+            ),
+        }
+
+    async def get_pvc_status(self, args: PVCArgs) -> dict:
+        return await self._run(self._pvc_status, args.namespace, args.name)

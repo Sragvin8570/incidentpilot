@@ -122,6 +122,14 @@ worker from the repository root with:
 celery --workdir backend -A app.workers.celery_app:celery_app worker --loglevel=INFO
 ```
 
+Run Celery beat as a separate process (Celery's embedded `--beat` mode is not
+supported on Windows) to periodically escalate investigations that exceed
+`INVESTIGATION_TIMEOUT_SECONDS`:
+
+```sh
+celery --workdir backend -A app.workers.celery_app:celery_app beat --loglevel=INFO
+```
+
 Configure `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` for an OpenAI-compatible
 provider. Configure `PROMETHEUS_URL` to reach Prometheus; when running the API
 outside the cluster, port-forward the Prometheus service to `localhost:9090`.
@@ -129,8 +137,9 @@ The default development model is `gemini-3.5-flash-lite`; set `LLM_MODEL=gemini-
 for evaluation.
 The investigator uses bounded, read-only Kubernetes and Prometheus tools, stores
 sanitized tool results as evidence, and escalates on LLM errors or investigation
-limits. RCA and remediation are separate later phases; a completed investigation
-does not resolve an incident.
+limits. A valid structured RCA is checked against stored evidence and the action
+catalog before an incident reaches `ANALYZED`. RCA recommends actions only; this
+phase does not execute remediation or resolve incidents.
 
 ## Live phase 1–3 verification
 
@@ -149,6 +158,45 @@ Prometheus scrapes the demo app; and deploys a uniquely named CrashLoop workload
 in `dev`. It reports PASS/FAIL evidence for the phase 1–3 `done_when` gates and
 removes only that temporary crash-loop Deployment. Do not start phase 4 unless
 all three live gates pass.
+
+## Phase 4: runbooks and RCA
+
+Runbook Markdown lives in `runbooks/` and links to an action through its
+`linked_action_id` front-matter value. Actions and their parameter schemas,
+bounds, target kinds, and risk levels live in `config/actions/`. Install the
+backend requirements, apply migrations, then ingest the heading-based chunks
+using the local CPU embedding model:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+.\.venv\Scripts\python.exe backend\scripts\ingest_runbooks.py
+```
+
+The embedding model defaults to `sentence-transformers/all-MiniLM-L6-v2` and
+runs on CPU. The investigator exposes `search_runbooks` and
+`find_similar_incidents`; RCA uses strict structured output, validates all
+claim evidence IDs and action parameters, and escalates after one invalid-output
+retry. Start the worker with `--beat` for the investigation-timeout watchdog.
+
+After phases 1–3 have passed live, verify phase 4 without starting phase 5:
+
+```powershell
+.\.venv\Scripts\python.exe backend\scripts\verify_phase_4.py --confirm-live
+```
+
+The verifier runs two isolated CrashLoop scenarios: a deterministic `exit 1`
+with one Deployment revision (expected `none` and escalation with the RCA
+attached), and a healthy revision followed by a failing revision (expected
+`rollback_deployment`, citing `get_rollout_history`). Each case checks that
+every RCA claim cites existing evidence and removes only its temporary
+Deployment. No recommended action is executed.
+
+The earlier transient test was not a real dependency outage: its BusyBox
+command printed a dependency-failure message, exited with status 42 for its
+first three starts, then exited successfully on the fourth. It did not connect
+to or depend on a separate service, so it is not counted as a phase-4
+acceptance scenario.
 
 To rerun only the phase 3 live investigation after phases 1 and 2 are already
 verified, use:

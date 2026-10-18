@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_api_key: SecretStr | None = None
     llm_model: str = "gemini-3.5-flash-lite"
+    investigation_timeout_seconds: int = Field(default=300, gt=0)
+    runbook_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     prometheus_url: str = "http://localhost:9090"
     alertmanager_webhook_token: SecretStr | None = None
     confidence_threshold: float = Field(default=0.8, ge=0, le=1)

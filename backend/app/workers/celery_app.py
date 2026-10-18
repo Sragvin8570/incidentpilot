@@ -16,4 +16,10 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     imports=("app.workers.tasks",),
+    beat_schedule={
+        "escalate-stuck-investigations": {
+            "task": "incidentpilot.escalate_stuck_investigations",
+            "schedule": 60.0,
+        }
+    },
 )

@@ -24,9 +24,10 @@ class EchoArgs(BaseModel):
 
 
 class FakeMessage:
-    def __init__(self, *, content=None, tool_calls=None) -> None:
+    def __init__(self, *, content=None, tool_calls=None, refusal=None) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        self.refusal = refusal
 
     def model_dump(self, exclude_none: bool = False) -> dict:
         result = {"role": "assistant", "content": self.content}
@@ -372,13 +373,68 @@ def test_failed_investigation_is_audited_and_escalated() -> None:
     run_scenario(scenario, state=IncidentState.ENRICHED)
 
 
-def test_successful_investigation_is_audited_without_starting_rca() -> None:
+def test_successful_investigation_persists_rca_and_transitions_to_analyzed() -> None:
     async def scenario(session, factory, incident_id) -> None:
+        incident = await session.get(Incident, incident_id)
+        assert incident is not None
+        incident.namespace = "dev"
+        incident.target_kind = "Deployment"
+        incident.target_name = "demo"
+        evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="get_pod_logs",
+            args_json={"namespace": "dev", "name": "demo"},
+            result_text="temporary dependency connection refused",
+        )
+        runbook_evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="search_runbooks",
+            args_json={"query": "transient dependency crash loop"},
+            result_text=json.dumps(
+                {"results": [{"linked_action_id": "restart_workload"}]}
+            ),
+        )
+        session.add(runbook_evidence)
+        session.add(evidence)
+        await session.commit()
+
         class CompletedRunner:
+            model = "test-model"
+            client = FakeClient(
+                [
+                    FakeMessage(
+                        content=json.dumps(
+                            {
+                                "root_cause": "A temporary dependency outage.",
+                                "reasoning_steps": ["Logs show a connection refusal."],
+                                "claims": [
+                                    {
+                                        "claim": "The dependency was temporarily unavailable.",
+                                        "evidence_ids": [str(evidence.id)],
+                                    }
+                                ],
+                                "llm_confidence": 0.9,
+                                "recommended_action": "restart_workload",
+                                "action_parameters": {
+                                    "namespace": "dev",
+                                    "name": "demo",
+                                },
+                                "target": {
+                                    "namespace": "dev",
+                                    "kind": "Deployment",
+                                    "name": "demo",
+                                },
+                                "alternatives_considered": ["rollback_deployment"],
+                            }
+                        )
+                    )
+                ]
+            )
+
             async def run(self, *args) -> AgentRunResult:
                 return AgentRunResult(
                     status="completed",
-                    evidence_ids=(),
+                    evidence_ids=(evidence.id,),
                     final_response="Read-only evidence collected.",
                 )
 
@@ -393,15 +449,91 @@ def test_successful_investigation_is_audited_without_starting_rca() -> None:
         incident = await session.get(Incident, incident_id)
         assert incident is not None
         await session.refresh(incident)
-        assert incident.state == IncidentState.INVESTIGATING
+        assert incident.state == IncidentState.ANALYZED
+        assert incident.rca_json is not None
+        assert incident.rca_json["recommended_action"] == "restart_workload"
         event = await session.scalar(
             select(AuditEvent)
             .where(AuditEvent.incident_id == incident_id)
             .order_by(AuditEvent.id.desc())
         )
         assert event is not None
-        assert event.detail_json["status"] == "completed"
-        assert event.detail_json["stage"] == "evidence_investigation"
+        assert event.to_state == IncidentState.ANALYZED.value
+        assert event.detail_json["stage"] == "rca"
+
+    run_scenario(scenario, state=IncidentState.ENRICHED)
+
+
+def test_unconfigured_recommendation_escalates_with_rca_attached() -> None:
+    async def scenario(session, factory, incident_id) -> None:
+        incident = await session.get(Incident, incident_id)
+        assert incident is not None
+        incident.namespace = "dev"
+        incident.target_kind = "Deployment"
+        incident.target_name = "demo"
+        evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="get_pod_logs",
+            args_json={},
+            result_text="temporary dependency connection refused",
+        )
+        runbook_evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="search_runbooks",
+            args_json={},
+            result_text=json.dumps(
+                {"results": [{"linked_action_id": "restart_workload"}]}
+            ),
+        )
+        session.add_all([evidence, runbook_evidence])
+        await session.commit()
+        payload = {
+            "root_cause": "A temporary dependency outage.",
+            "reasoning_steps": ["Logs show a connection refusal."],
+            "claims": [
+                {
+                    "claim": "The dependency was temporarily unavailable.",
+                    "evidence_ids": [str(evidence.id)],
+                }
+            ],
+            "llm_confidence": 0.9,
+            "recommended_action": "not_in_catalog",
+            "action_parameters": {"namespace": "dev", "name": "demo"},
+            "target": {"namespace": "dev", "kind": "Deployment", "name": "demo"},
+            "alternatives_considered": [],
+        }
+
+        class CompletedRunner:
+            model = "test-model"
+            client = FakeClient([FakeMessage(content=json.dumps(payload))])
+
+            async def run(self, *args) -> AgentRunResult:
+                return AgentRunResult(
+                    status="completed",
+                    evidence_ids=(evidence.id,),
+                )
+
+        await run_investigation(
+            incident_id,
+            CompletedRunner(),
+            ToolRegistry([]),
+            factory,
+        )
+        await session.refresh(incident)
+        audit = await session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.incident_id == incident_id)
+            .order_by(AuditEvent.id.desc())
+        )
+
+        assert incident.state == IncidentState.ESCALATED
+        assert incident.rca_json is not None
+        assert incident.rca_json["recommended_action"] == "not_in_catalog"
+        assert audit is not None
+        assert audit.detail_json["reason"] == (
+            "recommended_action_not_configured:not_in_catalog"
+        )
+        assert audit.detail_json["rca_attached"] is True
 
     run_scenario(scenario, state=IncidentState.ENRICHED)
 

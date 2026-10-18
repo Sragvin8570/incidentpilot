@@ -1,0 +1,21 @@
+id: restart_workload
+risk_level: low
+applies_to_kinds:
+  - Deployment
+parameters:
+  type: object
+  additionalProperties: false
+  required: [namespace, name]
+  properties:
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    name:
+      type: string
+      minLength: 1
+      maxLength: 253
+      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+bounds:
+  effect: Rolling restart; only for transient failures whose dependency is healthy.

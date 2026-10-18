@@ -1,0 +1,25 @@
+id: scale_deployment
+risk_level: medium
+applies_to_kinds:
+  - Deployment
+parameters:
+  type: object
+  additionalProperties: false
+  required: [namespace, name, replicas]
+  properties:
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    name:
+      type: string
+      minLength: 1
+      maxLength: 253
+      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    replicas:
+      type: integer
+      minimum: 1
+bounds:
+  maximum_increase: 3
+  direction: increase_only

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, JSON, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.types import Uuid
 
 from app.db.base import Base
@@ -57,6 +58,7 @@ class Incident(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rca_json: Mapped[dict | None] = mapped_column(JSON)
 
     occurrences: Mapped[list["AlertOccurrence"]] = relationship(
         back_populates="incident", cascade="all, delete-orphan"
@@ -95,6 +97,22 @@ class Evidence(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RunbookChunk(Base):
+    __tablename__ = "runbook_chunks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    runbook_id: Mapped[str] = mapped_column(String(128), index=True)
+    action_id: Mapped[str] = mapped_column(String(128), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    heading: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column(JSON)
+    embedding: Mapped[list[float]] = mapped_column(Vector(384))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

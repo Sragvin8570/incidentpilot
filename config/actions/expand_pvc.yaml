@@ -1,0 +1,26 @@
+id: expand_pvc
+risk_level: high
+applies_to_kinds:
+  - PersistentVolumeClaim
+parameters:
+  type: object
+  additionalProperties: false
+  required: [namespace, name, new_size]
+  properties:
+    namespace:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    name:
+      type: string
+      minLength: 1
+      maxLength: 253
+      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    new_size:
+      type: string
+      pattern: "^[1-9][0-9]*(Ki|Mi|Gi|Ti)$"
+bounds:
+  maximum_current_size_multiplier: 1.5
+  direction: increase_only
+  storage_class_must_allow_expansion: true
