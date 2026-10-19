@@ -61,10 +61,11 @@ class RunbookSearchTools:
     async def search_runbooks(self, args: SearchRunbooksArgs) -> dict[str, Any]:
         query_vector = (await self._embed([args.query]))[0]
         async with self.session_factory() as session:
+            distance = RunbookChunk.embedding.cosine_distance(query_vector)
             rows = (
-                await session.scalars(
-                    select(RunbookChunk)
-                    .order_by(RunbookChunk.embedding.cosine_distance(query_vector))
+                await session.execute(
+                    select(RunbookChunk, (1 - distance).label("similarity"))
+                    .order_by(distance)
                     .limit(args.limit)
                 )
             ).all()
@@ -76,8 +77,11 @@ class RunbookSearchTools:
                     "title": row.title,
                     "heading": row.heading,
                     "content": row.content,
+                    "similarity": round(
+                        min(1.0, max(0.0, float(similarity))), 4
+                    ),
                 }
-                for row in rows
+                for row, similarity in rows
             ]
         }
 

@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     runbook_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     prometheus_url: str = "http://localhost:9090"
     alertmanager_webhook_token: SecretStr | None = None
-    confidence_threshold: float = Field(default=0.8, ge=0, le=1)
     approval_expiry_minutes: int = Field(default=30, gt=0)
 
     model_config = SettingsConfigDict(

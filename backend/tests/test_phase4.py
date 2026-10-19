@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.agent.actions import ActionCatalog
 from app.agent.rca import RCAValidationError, generate_rca
 from app.agent.service import escalate_stuck_investigations
+from app.agent.tools.kubernetes import KubernetesEvidenceTools
 from app.agent.tools.runbooks import RunbookSearchTools, SimilarIncidentsArgs
 from app.db.base import Base
 from app.db.models import AuditEvent, Evidence, Incident, IncidentState, RunbookChunk
@@ -109,6 +110,41 @@ def test_action_catalog_matches_runbook_ids_risks_and_enforces_schema() -> None:
     assert catalog.validate_recommendation("unknown_action", {}, "Deployment", []) == (
         "recommended_action_not_configured:unknown_action"
     )
+
+
+def test_pod_evidence_resolves_owning_deployment() -> None:
+    class FakeApps:
+        def read_namespaced_replica_set(self, name: str, namespace: str):
+            assert name == "demo-rs"
+            assert namespace == "dev"
+            return SimpleNamespace(
+                metadata=SimpleNamespace(
+                    owner_references=[
+                        SimpleNamespace(
+                            kind="Deployment", name="demo", controller=True
+                        )
+                    ]
+                )
+            )
+
+    tools = KubernetesEvidenceTools()
+    tools._core = object()
+    tools._apps = FakeApps()
+    tools._storage = object()
+    pod = SimpleNamespace(
+        metadata=SimpleNamespace(
+            owner_references=[
+                SimpleNamespace(
+                    kind="ReplicaSet", name="demo-rs", controller=True
+                )
+            ]
+        )
+    )
+
+    assert tools._owning_workload(pod, "dev") == {
+        "kind": "Deployment",
+        "name": "demo",
+    }
 
 
 def test_scale_action_enforces_relative_replica_bound() -> None:
@@ -237,7 +273,14 @@ def test_rollback_rca_must_cite_rollout_history() -> None:
             tool_name="search_runbooks",
             args_json={},
             result_text=json.dumps(
-                {"results": [{"linked_action_id": "rollback_deployment"}]}
+                {
+                    "results": [
+                        {
+                            "linked_action_id": "rollback_deployment",
+                            "similarity": 0.9,
+                        }
+                    ]
+                }
             ),
         )
         invalid = rca_payload(
@@ -302,7 +345,14 @@ def test_rca_structured_output_retries_invalid_json_once() -> None:
             tool_name="search_runbooks",
             args_json={"query": "transient dependency"},
             result_text=json.dumps(
-                {"results": [{"linked_action_id": "restart_workload"}]}
+                {
+                    "results": [
+                        {
+                            "linked_action_id": "restart_workload",
+                            "similarity": 0.9,
+                        }
+                    ]
+                }
             ),
         )
         client = FakeRCAClient(
@@ -346,7 +396,14 @@ def test_rca_retries_then_rejects_claims_citing_missing_evidence() -> None:
             tool_name="search_runbooks",
             args_json={"query": "crash loop"},
             result_text=json.dumps(
-                {"results": [{"linked_action_id": "restart_workload"}]}
+                {
+                    "results": [
+                        {
+                            "linked_action_id": "restart_workload",
+                            "similarity": 0.9,
+                        }
+                    ]
+                }
             ),
         )
         client = FakeRCAClient(

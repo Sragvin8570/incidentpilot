@@ -16,6 +16,7 @@ class IncidentState(str, enum.Enum):
     ENRICHED = "ENRICHED"
     INVESTIGATING = "INVESTIGATING"
     ANALYZED = "ANALYZED"
+    READY = "READY"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -66,6 +67,9 @@ class Incident(Base):
     audit_events: Mapped[list["AuditEvent"]] = relationship(
         back_populates="incident", cascade="all, delete-orphan"
     )
+    decision: Mapped["Decision | None"] = relationship(
+        back_populates="incident", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class AlertOccurrence(Base):
@@ -98,6 +102,32 @@ class Evidence(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), unique=True
+    )
+    recommended_action: Mapped[str] = mapped_column(String(128))
+    outcome: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[float] = mapped_column()
+    llm_confidence: Mapped[float] = mapped_column()
+    grounding_score: Mapped[float] = mapped_column()
+    claim_grounding: Mapped[list[dict]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
+    runbook_score: Mapped[float] = mapped_column()
+    risk_score: Mapped[float] = mapped_column()
+    risk_reason: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    incident: Mapped[Incident] = relationship(back_populates="decision")
 
 
 class RunbookChunk(Base):

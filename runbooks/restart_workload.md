@@ -1,15 +1,16 @@
 ---
 id: rb-restart-workload
-title: Restart a crash-looping Deployment
+title: Restart a crash-looping workload
 linked_action_id: restart_workload
 risk_level: low
+applies_to_kinds: [Deployment, StatefulSet]
 applies_to_kinds: [Deployment]
 ---
 
-# Restart a crash-looping Deployment
+# Restart a crash-looping workload
 
 ## Symptoms
-- Alert `PodCrashLooping` firing for a pod owned by a Deployment.
+- Alert `PodCrashLooping` firing for a pod owned by a Deployment or StatefulSet.
 - Container state `CrashLoopBackOff` with a rising restart count.
 - The failure looks transient: a dependency was briefly unavailable, a stuck connection, a corrupted in-memory cache, or a one-off startup race.
 
@@ -18,6 +19,8 @@ applies_to_kinds: [Deployment]
 - `get_pod_logs` with `previous=true`: errors point to a temporary condition, e.g. "connection refused" to a dependency that is now healthy, timeouts during startup, or lock/cache errors.
 - `get_rollout_history`: NO new revision in the last hour. If the image or config changed recently, use `rollback_deployment` instead.
 - `get_events`: no `FailedScheduling`, `ImagePullBackOff` or `FailedMount` events.
+- A StatefulSet target is eligible when its pod has a transient startup failure
+  and the dependency has recovered; use the same restart safety checks.
 
 ## Do NOT use when
 - Last termination reason is `OOMKilled` → use `increase_memory_limit`.
@@ -26,7 +29,7 @@ applies_to_kinds: [Deployment]
 - The dependency the logs point to is still down. Fix or escalate the dependency instead.
 
 ## Action
-- Action: `restart_workload` (rolling restart of the Deployment).
+- Action: `restart_workload` (rolling restart of the Deployment or StatefulSet).
 - Parameters: `namespace`, `name`.
 - Effect: pods are recreated one by one; the spec is unchanged except the restart annotation.
 

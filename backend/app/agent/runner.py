@@ -98,6 +98,108 @@ class AgentRunner:
             await session.commit()
         return evidence.id
 
+    async def _investigate(
+        self,
+        *,
+        incident_id: UUID,
+        messages: list[dict[str, Any]],
+        tools: ToolRegistry,
+        deadline: float,
+    ) -> AgentRunResult:
+        evidence_ids: list[UUID] = []
+        tool_calls_used = 0
+        retry_budget = RateLimitRetryBudget()
+        loop = asyncio.get_running_loop()
+
+        while True:
+            try:
+                response = await create_with_rate_limit_retry(
+                    lambda: self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        tools=tools.openai_definitions(),
+                        tool_choice="auto",
+                        temperature=0,
+                    ),
+                    deadline=deadline,
+                    loop=loop,
+                    budget=retry_budget,
+                )
+            except RateLimitEscalation as error:
+                return AgentRunResult(
+                    status="escalated",
+                    evidence_ids=tuple(evidence_ids),
+                    error=str(error),
+                    deadline=deadline,
+                    rate_limit_retries=retry_budget.retries,
+                )
+            message = response.choices[0].message
+            messages.append(message.model_dump(exclude_none=True))
+            if not message.tool_calls:
+                return AgentRunResult(
+                    status="completed",
+                    evidence_ids=tuple(evidence_ids),
+                    final_response=message.content,
+                    deadline=deadline,
+                    rate_limit_retries=retry_budget.retries,
+                )
+
+            for tool_call in message.tool_calls:
+                if tool_calls_used >= self.limits.max_tool_calls:
+                    return AgentRunResult(
+                        status="escalated",
+                        evidence_ids=tuple(evidence_ids),
+                        error="tool_call_limit_exceeded",
+                        deadline=deadline,
+                        rate_limit_retries=retry_budget.retries,
+                    )
+                tool_calls_used += 1
+                function = tool_call.function
+                arguments: dict[str, Any] = {}
+                error_text: str | None = None
+                try:
+                    parsed = json.loads(function.arguments)
+                    if not isinstance(parsed, dict):
+                        raise ValueError("Tool arguments must be a JSON object")
+                    arguments = parsed
+                    result = await tools.execute(function.name, arguments)
+                    result_text = json.dumps(
+                        result,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                except (
+                    json.JSONDecodeError,
+                    ValueError,
+                    ValidationError,
+                    ToolExecutionError,
+                    ToolNotFound,
+                ) as error:
+                    error_text = sanitize_evidence(str(error))
+                    result_text = json.dumps({"error": error_text})
+                sanitized_result = self._limit_result(sanitize_evidence(result_text))
+                evidence_id = await self._save_evidence(
+                    incident_id,
+                    function.name,
+                    arguments,
+                    sanitized_result,
+                    error_text,
+                )
+                evidence_ids.append(evidence_id)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(
+                            {
+                                "evidence_id": str(evidence_id),
+                                "untrusted_evidence": sanitized_result,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+
     async def run(
         self,
         incident_id: UUID,
@@ -120,118 +222,33 @@ class AgentRunner:
                 + "\n</untrusted_alert_context>",
             },
         ]
-        evidence_ids: list[UUID] = []
-        tool_calls_used = 0
-        retry_budget = RateLimitRetryBudget()
         deadline = 0.0
 
         try:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self.limits.timeout_seconds
-            async with asyncio.timeout(self.limits.timeout_seconds):
-                while True:
-                    try:
-                        response = await create_with_rate_limit_retry(
-                            lambda: self.client.chat.completions.create(
-                                model=self.model,
-                                messages=messages,
-                                tools=tools.openai_definitions(),
-                                tool_choice="auto",
-                                temperature=0,
-                            ),
-                            deadline=deadline,
-                            loop=loop,
-                            budget=retry_budget,
-                        )
-                    except RateLimitEscalation as error:
-                        return AgentRunResult(
-                            status="escalated",
-                            evidence_ids=tuple(evidence_ids),
-                            error=str(error),
-                            deadline=deadline,
-                            rate_limit_retries=retry_budget.retries,
-                        )
-                    message = response.choices[0].message
-                    messages.append(message.model_dump(exclude_none=True))
-                    if not message.tool_calls:
-                        return AgentRunResult(
-                            status="completed",
-                            evidence_ids=tuple(evidence_ids),
-                            final_response=message.content,
-                            deadline=deadline,
-                            rate_limit_retries=retry_budget.retries,
-                        )
-
-                    for tool_call in message.tool_calls:
-                        if tool_calls_used >= self.limits.max_tool_calls:
-                            return AgentRunResult(
-                                status="escalated",
-                                evidence_ids=tuple(evidence_ids),
-                                error="tool_call_limit_exceeded",
-                                deadline=deadline,
-                                rate_limit_retries=retry_budget.retries,
-                            )
-                        tool_calls_used += 1
-                        function = tool_call.function
-                        arguments: dict[str, Any] = {}
-                        error_text: str | None = None
-                        try:
-                            parsed = json.loads(function.arguments)
-                            if not isinstance(parsed, dict):
-                                raise ValueError("Tool arguments must be a JSON object")
-                            arguments = parsed
-                            result = await tools.execute(function.name, arguments)
-                            result_text = json.dumps(
-                                result,
-                                ensure_ascii=False,
-                                default=str,
-                            )
-                        except (
-                            json.JSONDecodeError,
-                            ValueError,
-                            ValidationError,
-                            ToolExecutionError,
-                            ToolNotFound,
-                        ) as error:
-                            error_text = sanitize_evidence(str(error))
-                            result_text = json.dumps({"error": error_text})
-                        sanitized_result = self._limit_result(
-                            sanitize_evidence(result_text)
-                        )
-                        evidence_id = await self._save_evidence(
-                            incident_id,
-                            function.name,
-                            arguments,
-                            sanitized_result,
-                            error_text,
-                        )
-                        evidence_ids.append(evidence_id)
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": json.dumps(
-                                    {
-                                        "evidence_id": str(evidence_id),
-                                        "untrusted_evidence": sanitized_result,
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            }
-                        )
+            return await asyncio.wait_for(
+                self._investigate(
+                    incident_id=incident_id,
+                    messages=messages,
+                    tools=tools,
+                    deadline=deadline,
+                ),
+                timeout=self.limits.timeout_seconds,
+            )
         except TimeoutError:
             return AgentRunResult(
                 status="escalated",
-                evidence_ids=tuple(evidence_ids),
+                evidence_ids=tuple(),
                 error="investigation_timeout",
                 deadline=deadline,
-                rate_limit_retries=retry_budget.retries,
+                rate_limit_retries=0,
             )
         except OpenAIError as error:
             return AgentRunResult(
                 status="escalated",
-                evidence_ids=tuple(evidence_ids),
+                evidence_ids=tuple(),
                 error=sanitize_evidence(str(error)),
                 deadline=deadline,
-                rate_limit_retries=retry_budget.retries,
+                rate_limit_retries=0,
             )

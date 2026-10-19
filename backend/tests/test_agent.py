@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from openai import RateLimitError
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -16,7 +17,7 @@ from app.agent.service import run_investigation
 from app.agent.sanitization import sanitize_evidence
 from app.agent.tools.base import Tool, ToolRegistry
 from app.db.base import Base
-from app.db.models import AuditEvent, Evidence, Incident, IncidentState
+from app.db.models import AuditEvent, Decision, Evidence, Incident, IncidentState
 
 
 class EchoArgs(BaseModel):
@@ -378,6 +379,7 @@ def test_successful_investigation_persists_rca_and_transitions_to_analyzed() -> 
         incident = await session.get(Incident, incident_id)
         assert incident is not None
         incident.namespace = "dev"
+        incident.environment = "dev"
         incident.target_kind = "Deployment"
         incident.target_name = "demo"
         evidence = Evidence(
@@ -391,7 +393,14 @@ def test_successful_investigation_persists_rca_and_transitions_to_analyzed() -> 
             tool_name="search_runbooks",
             args_json={"query": "transient dependency crash loop"},
             result_text=json.dumps(
-                {"results": [{"linked_action_id": "restart_workload"}]}
+                {
+                    "results": [
+                        {
+                            "linked_action_id": "restart_workload",
+                            "similarity": 0.9,
+                        }
+                    ]
+                }
             ),
         )
         session.add(runbook_evidence)
@@ -449,17 +458,30 @@ def test_successful_investigation_persists_rca_and_transitions_to_analyzed() -> 
         incident = await session.get(Incident, incident_id)
         assert incident is not None
         await session.refresh(incident)
-        assert incident.state == IncidentState.ANALYZED
+        assert incident.state == IncidentState.READY
         assert incident.rca_json is not None
         assert incident.rca_json["recommended_action"] == "restart_workload"
+        decision = await session.scalar(
+            select(Decision).where(Decision.incident_id == incident_id)
+        )
+        assert decision is not None
+        assert decision.outcome == "READY"
+        assert decision.llm_confidence == 0.9
+        assert decision.grounding_score == 1.0
+        assert decision.claim_grounding[0]["grounded"] is True
+        assert decision.claim_grounding[0]["target_evidence_ids"] == [
+            str(evidence.id)
+        ]
+        assert decision.runbook_score == pytest.approx(0.9)
+        assert decision.confidence == pytest.approx(0.94)
         event = await session.scalar(
             select(AuditEvent)
             .where(AuditEvent.incident_id == incident_id)
             .order_by(AuditEvent.id.desc())
         )
         assert event is not None
-        assert event.to_state == IncidentState.ANALYZED.value
-        assert event.detail_json["stage"] == "rca"
+        assert event.to_state == IncidentState.READY.value
+        assert event.detail_json["stage"] == "decision"
 
     run_scenario(scenario, state=IncidentState.ENRICHED)
 
@@ -482,7 +504,14 @@ def test_unconfigured_recommendation_escalates_with_rca_attached() -> None:
             tool_name="search_runbooks",
             args_json={},
             result_text=json.dumps(
-                {"results": [{"linked_action_id": "restart_workload"}]}
+                {
+                    "results": [
+                        {
+                            "linked_action_id": "restart_workload",
+                            "similarity": 0.9,
+                        }
+                    ]
+                }
             ),
         )
         session.add_all([evidence, runbook_evidence])
@@ -534,6 +563,85 @@ def test_unconfigured_recommendation_escalates_with_rca_attached() -> None:
             "recommended_action_not_configured:not_in_catalog"
         )
         assert audit.detail_json["rca_attached"] is True
+        decision = await session.scalar(
+            select(Decision).where(Decision.incident_id == incident_id)
+        )
+        assert decision is not None
+        assert decision.outcome == "ESCALATED"
+
+    run_scenario(scenario, state=IncidentState.ENRICHED)
+
+
+def test_none_recommendation_escalates_with_no_safe_action_reason() -> None:
+    async def scenario(session, factory, incident_id) -> None:
+        incident = await session.get(Incident, incident_id)
+        assert incident is not None
+        incident.namespace = "dev"
+        incident.environment = "dev"
+        incident.target_kind = "Deployment"
+        incident.target_name = "demo"
+        evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="get_pod_logs",
+            args_json={},
+            result_text="repeatable application failure, exit code 1",
+        )
+        runbook_evidence = Evidence(
+            incident_id=incident_id,
+            tool_name="search_runbooks",
+            args_json={},
+            result_text=json.dumps({"results": []}),
+        )
+        session.add_all([evidence, runbook_evidence])
+        await session.commit()
+        payload = {
+            "root_cause": "The application has a deterministic startup failure.",
+            "reasoning_steps": ["The application exits with code 1 on every start."],
+            "claims": [
+                {
+                    "claim": "The failure is repeatable.",
+                    "evidence_ids": [str(evidence.id)],
+                }
+            ],
+            "llm_confidence": 0.95,
+            "recommended_action": "none",
+            "action_parameters": {},
+            "target": {"namespace": "dev", "kind": "Deployment", "name": "demo"},
+            "alternatives_considered": ["restart_workload"],
+        }
+
+        class CompletedRunner:
+            model = "test-model"
+            client = FakeClient([FakeMessage(content=json.dumps(payload))])
+
+            async def run(self, *args) -> AgentRunResult:
+                return AgentRunResult(
+                    status="completed",
+                    evidence_ids=(evidence.id,),
+                )
+
+        await run_investigation(
+            incident_id,
+            CompletedRunner(),
+            ToolRegistry([]),
+            factory,
+        )
+        await session.refresh(incident)
+        decision = await session.scalar(
+            select(Decision).where(Decision.incident_id == incident_id)
+        )
+        audit = await session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.incident_id == incident_id)
+            .order_by(AuditEvent.id.desc())
+        )
+        assert incident.state == IncidentState.ESCALATED
+        assert incident.rca_json is not None
+        assert decision is not None
+        assert decision.reason == "no_safe_action"
+        assert decision.outcome == "ESCALATED"
+        assert audit is not None
+        assert audit.detail_json["reason"] == "no_safe_action"
 
     run_scenario(scenario, state=IncidentState.ENRICHED)
 

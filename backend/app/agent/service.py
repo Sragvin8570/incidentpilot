@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.actions import ActionCatalog
+from app.decision.policy import DecisionPolicy
 from app.agent.rca import RCAValidationError, generate_rca
 from app.agent.runner import AgentRunResult, AgentRunner
 from app.agent.tools.base import ToolRegistry
@@ -13,6 +14,7 @@ from app.config import Settings
 from app.db.models import (
     AlertOccurrence,
     AuditEvent,
+    Decision,
     Evidence,
     Incident,
     IncidentState,
@@ -75,6 +77,7 @@ async def run_investigation(
     if result.status in {"completed", "escalated"}:
         rca = None
         action_error = None
+        decision_result = None
         if result.status == "completed":
             try:
                 async with session_factory() as session:
@@ -95,11 +98,25 @@ async def run_investigation(
                     deadline=result.deadline,
                     rate_limit_retries=result.rate_limit_retries,
                 )
-                action_error = catalog.validate_recommendation(
-                    rca.recommended_action,
-                    rca.action_parameters.model_dump(exclude_none=True),
-                    rca.target.kind,
-                    evidence,
+                if rca.recommended_action != "none":
+                    action_error = catalog.validate_recommendation(
+                        rca.recommended_action,
+                        rca.action_parameters.model_dump(exclude_none=True),
+                        rca.target.kind,
+                        evidence,
+                    )
+                decision_result = DecisionPolicy.load().evaluate(
+                    recommended_action=rca.recommended_action,
+                    llm_confidence=rca.llm_confidence,
+                    claims=[
+                        claim.model_dump(mode="json") for claim in rca.claims
+                    ],
+                    evidence=evidence,
+                    environment=context["environment"],
+                    target_kind=rca.target.kind,
+                    catalog=catalog,
+                    target_name=rca.target.name,
+                    validation_error=action_error,
                 )
             except (RCAValidationError, OpenAIError, OSError, ValueError) as error:
                 result = AgentRunResult(
@@ -118,14 +135,33 @@ async def run_investigation(
                     incident.rca_json = rca.model_dump(
                         mode="json", exclude_none=True
                     )
-                if result.status == "escalated" or action_error is not None:
+                if decision_result is not None:
+                    session.add(
+                        Decision(
+                            incident_id=incident_id,
+                            recommended_action=rca.recommended_action,
+                            outcome=decision_result.outcome,
+                            confidence=decision_result.confidence,
+                            llm_confidence=decision_result.llm_confidence,
+                            grounding_score=decision_result.grounding_score,
+                            claim_grounding=decision_result.claim_grounding,
+                            runbook_score=decision_result.runbook_score,
+                            risk_score=decision_result.risk_score,
+                            risk_reason=decision_result.risk_reason,
+                            reason=decision_result.reason,
+                        )
+                    )
+                if result.status == "escalated" or (
+                    decision_result is not None
+                    and decision_result.outcome == "ESCALATED"
+                ):
                     reason = (
-                        action_error
-                        or result.error
-                        or "investigation_failed"
+                        decision_result.reason
+                        if decision_result is not None
+                        else result.error or "investigation_failed"
                     )
                     detail = {
-                        "stage": "rca",
+                        "stage": "decision" if decision_result else "rca",
                         "reason": reason,
                         "evidence_count": len(result.evidence_ids),
                         "rca_attached": rca is not None,
@@ -140,7 +176,7 @@ async def run_investigation(
                     )
                     await session.commit()
                     return result
-                if result.status == "completed":
+                if result.status == "completed" and decision_result is not None:
                     session.add(
                         AuditEvent(
                             incident_id=incident_id,
@@ -155,6 +191,11 @@ async def run_investigation(
                             },
                         )
                     )
+                    next_state = (
+                        IncidentState.AWAITING_APPROVAL
+                        if decision_result.outcome == "AWAITING_APPROVAL"
+                        else IncidentState.READY
+                    )
                     await transition_incident(
                         session,
                         incident,
@@ -163,6 +204,21 @@ async def run_investigation(
                             "stage": "rca",
                             "recommended_action": rca.recommended_action,
                             "llm_confidence": rca.llm_confidence,
+                            "evidence_count": len(result.evidence_ids),
+                        },
+                    )
+                    await transition_incident(
+                        session,
+                        incident,
+                        next_state,
+                        detail={
+                            "stage": "decision",
+                            "recommended_action": rca.recommended_action,
+                            "confidence": decision_result.confidence,
+                            "risk_score": decision_result.risk_score,
+                            "risk_reason": decision_result.risk_reason,
+                            "reason": decision_result.reason,
+                            "outcome": decision_result.outcome,
                             "evidence_count": len(result.evidence_ids),
                         },
                     )

@@ -1,0 +1,97 @@
+confidence:
+  weights:
+    llm_confidence: 0.2
+    grounding_score: 0.4
+    runbook_score: 0.4
+  threshold: 0.8
+
+risk:
+  rules:
+    - id: no_safe_action
+      score: 1.0
+      reason: no_safe_action
+      requires_approval: true
+      when:
+        recommended_action: none
+    - id: expand_pvc_always_requires_approval
+      score: 1.0
+      reason: expand_pvc_always_requires_approval
+      requires_approval: true
+      when:
+        recommended_action: expand_pvc
+    - id: unknown_environment_requires_approval
+      score: 0.95
+      reason: unknown_environment_requires_approval
+      requires_approval: true
+      when:
+        environment: unknown
+    - id: unknown_target_requires_approval
+      score: 0.95
+      reason: unknown_target_requires_approval
+      requires_approval: true
+      when:
+        target_kind: unknown
+    - id: unconfigured_action_requires_approval
+      score: 0.95
+      reason: unconfigured_action_requires_approval
+      requires_approval: true
+      when:
+        action_risk: unknown
+    - id: high_risk_action_requires_approval
+      score: 0.9
+      reason: high_risk_action_requires_approval
+      requires_approval: true
+      when:
+        action_risk: high
+    - id: statefulset_requires_approval
+      score: 0.9
+      reason: statefulset_requires_approval
+      requires_approval: true
+      when:
+        target_kind: StatefulSet
+    - id: node_requires_approval
+      score: 0.9
+      reason: node_requires_approval
+      requires_approval: true
+      when:
+        target_kind: Node
+    - id: pvc_target_requires_approval
+      score: 0.9
+      reason: pvc_target_requires_approval
+      requires_approval: true
+      when:
+        target_kind: PersistentVolumeClaim
+    - id: production_medium_risk_allowed
+      score: 0.5
+      reason: production_medium_risk_auto_execute
+      requires_approval: false
+      when:
+        environment: production
+        action_risk: medium
+    - id: production_low_risk_allowed
+      score: 0.3
+      reason: production_low_risk_auto_execute
+      requires_approval: false
+      when:
+        environment: production
+        action_risk: low
+    - id: development_medium_risk_allowed
+      score: 0.45
+      reason: development_medium_risk_auto_execute
+      requires_approval: false
+      when:
+        environment: dev
+        action_risk: medium
+    - id: development_low_risk_allowed
+      score: 0.3
+      reason: development_low_risk_auto_execute
+      requires_approval: false
+      when:
+        environment: dev
+        action_risk: low
+    - id: staging_requires_approval
+      score: 0.7
+      reason: staging_requires_approval
+      requires_approval: true
+      when:
+        environment: staging

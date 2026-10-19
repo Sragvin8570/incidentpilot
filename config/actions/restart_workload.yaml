@@ -2,6 +2,7 @@ id: restart_workload
 risk_level: low
 applies_to_kinds:
   - Deployment
+  - StatefulSet
 parameters:
   type: object
   additionalProperties: false

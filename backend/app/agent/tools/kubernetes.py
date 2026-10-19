@@ -159,6 +159,7 @@ class KubernetesEvidenceTools:
             "namespace": pod.metadata.namespace,
             "phase": pod.status.phase,
             "node": pod.spec.node_name,
+            "workload": self._owning_workload(pod, namespace),
             "containers": [
                 {
                     "name": item.name,
@@ -192,7 +193,39 @@ class KubernetesEvidenceTools:
             tail_lines=tail_lines,
             timestamps=True,
         )
-        return {"pod": name, "namespace": namespace, "logs": logs}
+        pod = self._core.read_namespaced_pod(name, namespace)
+        return {
+            "pod": name,
+            "namespace": namespace,
+            "workload": self._owning_workload(pod, namespace),
+            "logs": logs,
+        }
+
+    def _owning_workload(self, pod: Any, namespace: str) -> dict | None:
+        self._ensure_clients()
+        assert self._apps is not None
+        owners = pod.metadata.owner_references or []
+        if not owners:
+            return None
+        owner = next(
+            (reference for reference in owners if reference.controller),
+            owners[0],
+        )
+        if owner.kind == "ReplicaSet":
+            replica_set = self._apps.read_namespaced_replica_set(
+                owner.name, namespace
+            )
+            deployment = next(
+                (
+                    reference
+                    for reference in replica_set.metadata.owner_references or []
+                    if reference.kind == "Deployment" and reference.controller
+                ),
+                None,
+            )
+            if deployment is not None:
+                return {"kind": deployment.kind, "name": deployment.name}
+        return {"kind": owner.kind, "name": owner.name}
 
     async def get_pod_logs(self, args: PodLogsArgs) -> dict:
         return await self._run(

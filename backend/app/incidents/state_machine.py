@@ -19,9 +19,10 @@ ALLOWED_TRANSITIONS: dict[IncidentState | None, set[IncidentState]] = {
         IncidentState.ESCALATED,
     },
     IncidentState.ANALYZED: {
-        IncidentState.EXECUTING,
+        IncidentState.READY,
         IncidentState.AWAITING_APPROVAL,
     },
+    IncidentState.READY: {IncidentState.EXECUTING},
     IncidentState.AWAITING_APPROVAL: {
         IncidentState.APPROVED,
         IncidentState.REJECTED,
@@ -84,4 +85,3 @@ async def record_incident_creation(
             detail_json=detail or {},
         )
     )
-

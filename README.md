@@ -10,9 +10,9 @@ readiness endpoints, an initial incident schema, authenticated Alertmanager
 ingestion with deduplication and enrichment, and a bounded read-only evidence
 investigator. Live cluster validation is still pending.
 
-Values called proposed defaults in the specification (including the LLM model,
-confidence threshold, and approval expiry) remain configurable and are not
-represented as team-approved decisions.
+The investigation model remains configurable through `LLM_MODEL`. Decision
+confidence weights, threshold, and risk-routing rules are configured in
+`config/policy.yaml`.
 
 ## Prerequisites
 
@@ -197,6 +197,29 @@ command printed a dependency-failure message, exited with status 42 for its
 first three starts, then exited successfully on the fourth. It did not connect
 to or depend on a separate service, so it is not counted as a phase-4
 acceptance scenario.
+
+## Phase 5: policy decisions
+
+`config/policy.yaml` defines the confidence weights and threshold plus ordered
+risk-scoring rules. A persisted Decision records the LLM, evidence-grounding,
+and runbook components, the weighted confidence, highest matching risk score,
+and routing reason. Unlabeled environments are treated as production;
+production, StatefulSet targets, high-risk actions, and `expand_pvc` require
+approval. A confident low/medium-risk development recommendation is persisted
+as `READY`; this state does not execute the action.
+
+After applying the phase-5 migration, run the live policy gates without
+starting phase 6:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+.\.venv\Scripts\python.exe backend\scripts\verify_phase_5.py --confirm-live
+```
+
+The verifier sends scoped test alerts for a failing Deployment rollout in
+`dev` and `prod`, and a transiently failing StatefulSet in `prod`. It checks
+each persisted Decision and removes only its temporary workload. It does not
+execute any recommendation.
 
 To rerun only the phase 3 live investigation after phases 1 and 2 are already
 verified, use:
