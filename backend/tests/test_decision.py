@@ -214,6 +214,11 @@ def test_every_risk_rule_selects_the_highest_matching_score() -> None:
                     applies_to_kinds=["Deployment"],
                     parameters={"type": "object"},
                     bounds={},
+                    stabilization_seconds=0,
+                    alert_grace_seconds=0,
+                    recovery_promql="up",
+                    recovery_threshold="desired_replicas",
+                    recovery_operator=">=",
                 ),
             }
         )

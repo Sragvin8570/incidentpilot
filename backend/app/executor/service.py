@@ -66,7 +66,7 @@ async def execute_ready_incident(
             incident, decision, allow_approved=initial_state == IncidentState.APPROVED
         )
         manager = kubernetes_client or KubernetesExecutionClient()
-        snapshot, snapshot_hash, patch = manager.prepare(
+        snapshot, snapshot_hash, patch, applied_spec_hash = manager.prepare(
             action_id=action_id,
             target_kind=target_kind,
             parameters=parameters,
@@ -100,6 +100,7 @@ async def execute_ready_incident(
             return False
         execution.target_snapshot = snapshot
         execution.snapshot_hash = snapshot_hash
+        execution.applied_spec_hash = applied_spec_hash
         execution.patch_json = patch
         execution.job_name = job_name
         execution.status = "RUNNING"

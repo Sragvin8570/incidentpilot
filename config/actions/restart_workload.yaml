@@ -3,6 +3,11 @@ risk_level: low
 applies_to_kinds:
   - Deployment
   - StatefulSet
+stabilization_seconds: 30
+alert_grace_seconds: 40
+recovery_promql: (kube_deployment_status_replicas_available{namespace=__NAMESPACE__,deployment=__NAME__} or kube_statefulset_status_replicas_ready{namespace=__NAMESPACE__,statefulset=__NAME__})
+recovery_threshold: desired_replicas
+recovery_operator: ">="
 parameters:
   type: object
   additionalProperties: false

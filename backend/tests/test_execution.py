@@ -1,5 +1,8 @@
 import asyncio
+import hashlib
+import json
 from uuid import uuid4
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -9,6 +12,7 @@ from app.db.base import Base
 from app.db.models import Decision, Execution, Incident, IncidentState
 from app.executor.runtime import build_patch
 from app.executor.service import execute_ready_incident
+from app.executor.kubernetes import KubernetesExecutionClient
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 from scripts.install_executor_rbac import _rules, _upsert_binding
@@ -29,6 +33,7 @@ class FakeKubernetesClient:
             {"kind": "Deployment", "name": "demo", "namespace": "dev", "spec": {}},
             "a" * 64,
             {"spec": {"template": {"metadata": {"annotations": {}}}}},
+            "b" * 64,
         )
 
     def create_job(self, **kwargs) -> None:
@@ -130,6 +135,7 @@ def test_ready_incident_runs_one_job_and_rerun_is_idempotent() -> None:
             assert current.state == IncidentState.VERIFYING
             assert execution.status == "SUCCEEDED"
             assert execution.snapshot_hash == "a" * 64
+            assert execution.applied_spec_hash == "b" * 64
             assert execution.logs == "executor output"
             assert execution.job_name
         assert kubernetes.prepared == 1
@@ -338,6 +344,96 @@ def test_configured_action_patch_construction() -> None:
     assert build_patch(
         "expand_pvc", {}, {"new_size": "2Gi"}
     ) == {"spec": {"resources": {"requests": {"storage": "2Gi"}}}}
+
+
+def test_applied_spec_hash_uses_server_side_dry_run_result() -> None:
+    original = {"kind": "Deployment", "name": "demo", "namespace": "dev", "spec": {"replicas": 1}}
+    applied = {**original, "spec": {"replicas": 2}}
+
+    class FakeApiClient:
+        @staticmethod
+        def sanitize_for_serialization(value):
+            return value if isinstance(value, dict) else original
+
+    class FakeApps:
+        @staticmethod
+        def read_namespaced_deployment(name, namespace):
+            assert (name, namespace) == ("demo", "dev")
+            return SimpleNamespace(metadata=SimpleNamespace(resource_version="1"))
+
+        @staticmethod
+        def patch_namespaced_deployment(name, namespace, patch, *, dry_run):
+            assert (name, namespace, dry_run) == ("demo", "dev", "All")
+            assert patch["spec"]["replicas"] == 2
+            return applied
+
+    manager = object.__new__(KubernetesExecutionClient)
+    manager.api_client = FakeApiClient()
+    manager.apps = FakeApps()
+    snapshot, snapshot_hash, patch, applied_hash = manager.prepare(
+        action_id="scale_deployment",
+        target_kind="Deployment",
+        parameters={"namespace": "dev", "name": "demo", "replicas": 2},
+    )
+
+    expected = hashlib.sha256(
+        json.dumps(applied, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert snapshot["spec"] == {"replicas": 1}
+    assert patch["spec"]["replicas"] == 2
+    assert snapshot_hash != expected
+    assert applied_hash == expected
+
+
+def test_workload_health_reads_ready_counts_and_pod_restarts() -> None:
+    manager = object.__new__(KubernetesExecutionClient)
+    target = SimpleNamespace(
+        spec=SimpleNamespace(
+            replicas=2,
+            selector=SimpleNamespace(match_labels={"app": "demo"}),
+        ),
+        status=SimpleNamespace(
+            ready_replicas=2,
+            updated_replicas=2,
+            observed_generation=3,
+        ),
+        metadata=SimpleNamespace(generation=3),
+    )
+
+    class FakeCore:
+        @staticmethod
+        def list_namespaced_pod(namespace, *, label_selector):
+            assert namespace == "dev"
+            assert label_selector == "app=demo"
+            return SimpleNamespace(
+                items=[
+                    SimpleNamespace(
+                        metadata=SimpleNamespace(uid="pod-uid", name="demo-pod"),
+                        status=SimpleNamespace(
+                            container_statuses=[
+                                SimpleNamespace(name="app", restart_count=1)
+                            ]
+                        ),
+                    )
+                ]
+            )
+
+    manager.core = FakeCore()
+
+    def read_target(kind, name, namespace):
+        assert (kind, name, namespace) == ("Deployment", "demo", "dev")
+        return target
+
+    manager._read_target = read_target
+
+    assert manager.read_workload_health("Deployment", "demo", "dev") == {
+        "desired_replicas": 2,
+        "ready_replicas": 2,
+        "updated_replicas": 2,
+        "generation": 3,
+        "observed_generation": 3,
+        "restart_counts": {"pod-uid/app": 1},
+    }
 
 
 def test_action_service_accounts_get_only_required_namespaced_verbs() -> None:

@@ -2,7 +2,6 @@ import hashlib
 import json
 import time
 from typing import Any
-from uuid import UUID
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -27,7 +26,7 @@ class KubernetesExecutionClient:
         action_id: str,
         target_kind: str,
         parameters: dict[str, Any],
-    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    ) -> tuple[dict[str, Any], str, dict[str, Any], str]:
         namespace = parameters["namespace"]
         name = parameters["name"]
         target = self._read_target(target_kind, name, namespace)
@@ -56,8 +55,87 @@ class KubernetesExecutionClient:
         patch["metadata"] = {
             "resourceVersion": target.metadata.resource_version
         }
-        self._dry_run_patch(action_id, target_kind, name, namespace, patch)
-        return snapshot, snapshot_hash, patch
+        dry_run_target = self._dry_run_patch(
+            action_id, target_kind, name, namespace, patch
+        )
+        dry_run_spec = self.api_client.sanitize_for_serialization(dry_run_target).get(
+            "spec"
+        )
+        if not isinstance(dry_run_spec, dict):
+            raise ValueError("Server-side dry run returned no target spec")
+        applied_snapshot = {**snapshot, "spec": dry_run_spec}
+        applied_spec_hash = hashlib.sha256(
+            json.dumps(
+                applied_snapshot, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        return snapshot, snapshot_hash, patch, applied_spec_hash
+
+    def read_current_spec_hash(
+        self, target_kind: str, name: str, namespace: str
+    ) -> str:
+        target = self._read_target(target_kind, name, namespace)
+        snapshot = {
+            "kind": target_kind,
+            "namespace": namespace,
+            "name": name,
+            "spec": self.api_client.sanitize_for_serialization(target)["spec"],
+        }
+        return hashlib.sha256(
+            json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def read_workload_health(
+        self, target_kind: str, name: str, namespace: str
+    ) -> dict[str, Any]:
+        target = self._read_target(target_kind, name, namespace)
+        if target_kind == "PersistentVolumeClaim":
+            ready = int(target.status.phase == "Bound")
+            return {
+                "desired_replicas": 1,
+                "ready_replicas": ready,
+                "updated_replicas": ready,
+                "generation": 1,
+                "observed_generation": 1,
+                "restart_counts": {},
+                "target_status": target.status.phase,
+            }
+
+        if target_kind == "Deployment":
+            desired = target.spec.replicas if target.spec.replicas is not None else 1
+            ready = target.status.ready_replicas or 0
+            updated = target.status.updated_replicas or 0
+        elif target_kind == "StatefulSet":
+            desired = target.spec.replicas if target.spec.replicas is not None else 1
+            ready = target.status.ready_replicas or 0
+            updated = target.status.updated_replicas or 0
+        else:
+            raise ValueError(f"Unsupported verification target kind: {target_kind}")
+
+        selector = target.spec.selector.match_labels or {}
+        if not selector:
+            raise ValueError(f"{target_kind}/{name} has no pod selector")
+        label_selector = ",".join(
+            f"{key}={value}" for key, value in sorted(selector.items())
+        )
+        pods = self.core.list_namespaced_pod(
+            namespace, label_selector=label_selector
+        ).items
+        restart_counts = {
+            f"{pod.metadata.uid or pod.metadata.name}/{status.name}": (
+                status.restart_count or 0
+            )
+            for pod in pods
+            for status in pod.status.container_statuses or []
+        }
+        return {
+            "desired_replicas": desired,
+            "ready_replicas": ready,
+            "updated_replicas": updated,
+            "generation": target.metadata.generation or 0,
+            "observed_generation": target.status.observed_generation or 0,
+            "restart_counts": restart_counts,
+        }
 
     def create_job(
         self,
@@ -189,17 +267,17 @@ class KubernetesExecutionClient:
         name: str,
         namespace: str,
         patch: dict[str, Any],
-    ) -> None:
+    ) -> Any:
         if action_id == "expand_pvc":
-            self.core.patch_namespaced_persistent_volume_claim(
+            return self.core.patch_namespaced_persistent_volume_claim(
                 name, namespace, patch, dry_run="All"
             )
         elif target_kind == "Deployment":
-            self.apps.patch_namespaced_deployment(
+            return self.apps.patch_namespaced_deployment(
                 name, namespace, patch, dry_run="All"
             )
         elif target_kind == "StatefulSet":
-            self.apps.patch_namespaced_stateful_set(
+            return self.apps.patch_namespaced_stateful_set(
                 name, namespace, patch, dry_run="All"
             )
         else:

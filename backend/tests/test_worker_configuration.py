@@ -10,3 +10,10 @@ def test_celery_beat_expires_pending_approvals() -> None:
         "task": "incidentpilot.expire_pending_approvals",
         "schedule": 60.0,
     }
+
+
+def test_celery_beat_rechecks_verifying_incidents() -> None:
+    assert celery_app.conf.beat_schedule["verify-pending-incidents"] == {
+        "task": "incidentpilot.verify_pending_incidents",
+        "schedule": 60.0,
+    }

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.tools.base import Tool, ToolExecutionError, ToolRegistry
-from app.db.models import Incident, IncidentState, RunbookChunk
+from app.db.models import Incident, IncidentState, RunbookChunk, Verification
 from app.runbooks.embeddings import LocalRunbookEmbedder
 
 
@@ -89,14 +89,24 @@ class RunbookSearchTools:
         self, args: SimilarIncidentsArgs
     ) -> dict[str, Any]:
         async with self.session_factory() as session:
-            query = select(Incident).where(
-                Incident.state == IncidentState.ANALYZED,
-                Incident.rca_json.is_not(None),
+            query = (
+                select(Incident, Verification)
+                .outerjoin(Verification, Verification.incident_id == Incident.id)
+                .where(
+                    Incident.state.in_(
+                        {
+                            IncidentState.ANALYZED,
+                            IncidentState.RESOLVED,
+                            IncidentState.ESCALATED,
+                        }
+                    ),
+                    Incident.rca_json.is_not(None),
+                )
             )
             if args.exclude_incident_id is not None:
                 query = query.where(Incident.id != args.exclude_incident_id)
-            incidents = (
-                await session.scalars(
+            rows = (
+                await session.execute(
                     query.order_by(Incident.created_at.desc()).limit(100)
                 )
             ).all()
@@ -104,15 +114,16 @@ class RunbookSearchTools:
             (
                 incident,
                 incident.rca_json.get("root_cause", ""),
+                verification,
             )
-            for incident in incidents
+            for incident, verification in rows
             if isinstance(incident.rca_json, dict)
             and incident.rca_json.get("root_cause")
         ]
         if not candidates:
             return {"results": []}
         vectors = await self._embed(
-            [args.query, *[root_cause for _, root_cause in candidates]]
+            [args.query, *[root_cause for _, root_cause, _ in candidates]]
         )
         ranked = sorted(
             (
@@ -120,8 +131,9 @@ class RunbookSearchTools:
                     _cosine_similarity(vectors[0], vector),
                     incident,
                     root_cause,
+                    verification,
                 )
-                for (incident, root_cause), vector in zip(
+                for (incident, root_cause, verification), vector in zip(
                     candidates, vectors[1:], strict=True
                 )
             ),
@@ -140,8 +152,14 @@ class RunbookSearchTools:
                     },
                     "root_cause": root_cause,
                     "similarity": round(score, 4),
+                    "effectiveness_score": (
+                        verification.effectiveness_score
+                        if verification is not None
+                        and verification.status == "COMPLETED"
+                        else None
+                    ),
                 }
-                for score, incident, root_cause in ranked
+                for score, incident, root_cause, verification in ranked
             ]
         }
 

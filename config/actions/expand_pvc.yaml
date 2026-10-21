@@ -2,6 +2,11 @@ id: expand_pvc
 risk_level: high
 applies_to_kinds:
   - PersistentVolumeClaim
+stabilization_seconds: 30
+alert_grace_seconds: 40
+recovery_promql: kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace=__NAMESPACE__,persistentvolumeclaim=__NAME__}
+recovery_threshold: requested_storage_bytes
+recovery_operator: ">="
 parameters:
   type: object
   additionalProperties: false

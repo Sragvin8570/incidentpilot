@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.db.models import Incident, IncidentState
 from app.executor.service import execute_ready_incident
 from app.runbooks.embeddings import LocalRunbookEmbedder
+from app.verification.service import verify_incident
 from app.workers.celery_app import celery_app
 
 
@@ -84,7 +85,14 @@ async def _investigate_incident(incident_id: UUID) -> None:
     acks_late=True,
 )
 def execute_ready_incident_task(incident_id: str) -> bool:
-    return asyncio.run(_execute_ready_incident(UUID(incident_id)))
+    executed = asyncio.run(_execute_ready_incident(UUID(incident_id)))
+    if executed:
+        celery_app.send_task(
+            "incidentpilot.verify_incident",
+            args=[incident_id],
+            task_id=f"verify-{incident_id}",
+        )
+    return executed
 
 
 async def _execute_ready_incident(incident_id: UUID) -> bool:
@@ -98,6 +106,58 @@ async def _execute_ready_incident(incident_id: UUID) -> bool:
             executor_image=settings.executor_image,
             timeout_seconds=settings.execution_timeout_seconds,
         )
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
+    name="incidentpilot.verify_incident",
+    ignore_result=True,
+    acks_late=True,
+)
+def verify_incident_task(incident_id: str) -> bool:
+    return asyncio.run(_verify_incident(UUID(incident_id)))
+
+
+async def _verify_incident(incident_id: UUID) -> bool:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        return await verify_incident(
+            incident_id,
+            session_factory,
+            settings,
+        )
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
+    name="incidentpilot.verify_pending_incidents",
+    ignore_result=True,
+)
+def verify_pending_incidents_task() -> int:
+    return asyncio.run(_verify_pending_incidents())
+
+
+async def _verify_pending_incidents() -> int:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            incident_ids = (
+                await session.scalars(
+                    select(Incident.id).where(
+                        Incident.state == IncidentState.VERIFYING
+                    )
+                )
+            ).all()
+        verified = 0
+        for incident_id in incident_ids:
+            verified += await _verify_incident(incident_id)
+        return verified
     finally:
         await engine.dispose()
 

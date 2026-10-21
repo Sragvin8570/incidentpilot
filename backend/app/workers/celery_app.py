@@ -25,5 +25,9 @@ celery_app.conf.update(
             "task": "incidentpilot.expire_pending_approvals",
             "schedule": 60.0,
         },
+        "verify-pending-incidents": {
+            "task": "incidentpilot.verify_pending_incidents",
+            "schedule": 60.0,
+        },
     },
 )

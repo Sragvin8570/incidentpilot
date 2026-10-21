@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     investigation_timeout_seconds: int = Field(default=300, gt=0)
     runbook_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     prometheus_url: str = "http://localhost:9090"
+    alertmanager_url: str = "http://localhost:9093"
     alertmanager_webhook_token: SecretStr | None = None
     approval_expiry_minutes: int = Field(default=30, gt=0)
     access_token_expiry_minutes: int = Field(default=60, gt=0)

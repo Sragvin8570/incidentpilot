@@ -304,6 +304,34 @@ to select real read-only tools and complete the investigation. It does not
 recreate the cluster, reapply phase 1–2 resources, or delete the resulting
 incident/evidence/audit record.
 
+## Phase 8: closed-loop verification
+
+Successful Jobs enter `VERIFYING` and automatically start closed-loop checks.
+Each action in `config/actions` defines a stabilization window, alert grace
+period, recovery PromQL expression, threshold, and comparison operator. The
+worker confirms desired replicas are Ready with no restart-count increases,
+checks the original Alertmanager fingerprint is no longer active, evaluates
+the configured Prometheus recovery metric, and compares the current target
+spec hash with the expected hash after the execution patch. All four checks
+are stored in one Verification row with an effectiveness score from 0 to 1.
+Passing checks resolve the incident; any failure records the failing checks
+and escalates it. A periodic Celery task recovers missed verification dispatches.
+`find_similar_incidents` includes completed effectiveness scores when present.
+
+Set `PROMETHEUS_URL` and `ALERTMANAGER_URL` to reachable endpoints (the default
+local ports are 9090 and 9093), apply migrations, then run the live gate:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+.\.venv\Scripts\python.exe backend\scripts\verify_phase_8.py --confirm-live
+```
+
+The gate checks that a real dev CrashLoop alert is rolled back to the previous
+healthy revision and resolves only after all checks pass. A second case reapplies
+the failing revision during stabilization and must escalate with workload health
+and change persistence failures. It removes only its named test Deployments and
+executor Jobs.
+
 ## Security and safety
 
 - Do not commit credentials or `.env`.

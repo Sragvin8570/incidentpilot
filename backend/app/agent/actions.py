@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import yaml
 from jsonschema import Draft202012Validator
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import Evidence
 
@@ -19,6 +19,13 @@ class ActionDefinition(BaseModel):
     applies_to_kinds: list[str]
     parameters: dict[str, Any]
     bounds: dict[str, Any]
+    stabilization_seconds: int = Field(ge=0)
+    alert_grace_seconds: int = Field(ge=0)
+    recovery_promql: str = Field(min_length=1)
+    recovery_threshold: Literal[
+        "desired_replicas", "memory_limit_bytes", "requested_storage_bytes"
+    ]
+    recovery_operator: Literal[">=", "<="]
 
 
 class ActionCatalog:
