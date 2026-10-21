@@ -138,6 +138,39 @@ def test_ready_incident_runs_one_job_and_rerun_is_idempotent() -> None:
     run_scenario(scenario)
 
 
+def test_approved_statefulset_runs_through_existing_executor_path() -> None:
+    async def scenario(factory) -> None:
+        incident = await create_incident(
+            factory,
+            state=IncidentState.APPROVED,
+            namespace="prod",
+            environment="production",
+            target_kind="StatefulSet",
+            decision_outcome="AWAITING_APPROVAL",
+        )
+        kubernetes = FakeKubernetesClient()
+
+        assert await execute_ready_incident(
+            incident.id,
+            factory,
+            executor_image="incidentpilot-executor:test",
+            timeout_seconds=30,
+            kubernetes_client=kubernetes,
+        )
+
+        async with factory() as session:
+            current = await session.get(Incident, incident.id)
+            execution = await session.scalar(
+                select(Execution).where(Execution.incident_id == incident.id)
+            )
+            assert current.state == IncidentState.VERIFYING
+            assert execution.status == "SUCCEEDED"
+        assert kubernetes.prepared == 1
+        assert kubernetes.created_jobs == 1
+
+    run_scenario(scenario)
+
+
 def test_prod_statefulset_waiting_for_approval_is_never_executed() -> None:
     async def scenario(factory) -> None:
         incident = await create_incident(

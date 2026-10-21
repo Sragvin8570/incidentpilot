@@ -15,6 +15,7 @@ from app.agent.tools.base import ToolRegistry
 from app.agent.tools.kubernetes import KubernetesEvidenceTools
 from app.agent.tools.prometheus import PrometheusEvidenceTools
 from app.agent.tools.runbooks import RunbookSearchTools
+from app.approvals.service import expire_pending_approvals
 from app.config import get_settings
 from app.db.models import Incident, IncidentState
 from app.executor.service import execute_ready_incident
@@ -117,6 +118,27 @@ async def _escalate_stuck_investigations() -> int:
         return await escalate_stuck_investigations(
             session_factory,
             timeout_seconds=settings.investigation_timeout_seconds,
+        )
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(
+    name="incidentpilot.expire_pending_approvals",
+    ignore_result=True,
+)
+def expire_pending_approvals_task() -> int:
+    return asyncio.run(_expire_pending_approvals())
+
+
+async def _expire_pending_approvals() -> int:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        return await expire_pending_approvals(
+            session_factory,
+            expiry_minutes=settings.approval_expiry_minutes,
         )
     finally:
         await engine.dispose()

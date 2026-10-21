@@ -192,6 +192,36 @@ attached), and a healthy revision followed by a failing revision (expected
 every RCA claim cites existing evidence and removes only its temporary
 Deployment. No recommended action is executed.
 
+## Phase 7a: authentication and approvals (backend)
+
+Set `APPROVER_USERNAME` and a unique, long `APPROVER_PASSWORD` in `.env`.
+After applying migrations, the API seeds this account as an approver on startup;
+the standalone `backend\scripts\seed_approver.py` command can seed it explicitly.
+Passwords are stored as salted PBKDF2 hashes and are never included in manifests
+or source control. JWT access tokens are issued by `POST /api/v1/auth/login`;
+`ACCESS_TOKEN_EXPIRY_MINUTES` controls their lifetime. The pending approvals
+endpoint is `GET /api/v1/approvals/pending`. Authenticated approver/admin users
+can `POST /api/v1/approvals/{incident_id}/approve` or reject with a required
+`{"comment":"..."}` body at `/api/v1/approvals/{incident_id}/reject`. Every
+decision audit records the acting username, role, and rejection comment.
+Approvals expire after `APPROVAL_EXPIRY_MINUTES` (default 30); API reads and
+the Celery beat expiry task transition expired incidents through `EXPIRED` to
+`ESCALATED`. Approved incidents use the existing phase-6 preflight, snapshot,
+RBAC-scoped Job, and idempotent execution flow.
+
+Run the live phase-7a gates only with an initialized Kind cluster and the
+approver environment variables configured:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+.\.venv\Scripts\python.exe backend\scripts\verify_phase_7a.py --confirm-live
+```
+
+The gate checks an approved production StatefulSet reaches `VERIFYING` after
+its Job succeeds, a viewer receives HTTP 403 when attempting approval, and a
+second production StatefulSet is rejected and escalated without a Job. It
+cleans up only its uniquely named workloads, Jobs, and temporary viewer.
+
 The earlier transient test was not a real dependency outage: its BusyBox
 command printed a dependency-failure message, exited with status 42 for its
 first three starts, then exited successfully on the fourth. It did not connect

@@ -20,6 +20,10 @@ celery_app.conf.update(
         "escalate-stuck-investigations": {
             "task": "incidentpilot.escalate_stuck_investigations",
             "schedule": 60.0,
-        }
+        },
+        "expire-pending-approvals": {
+            "task": "incidentpilot.expire_pending_approvals",
+            "schedule": 60.0,
+        },
     },
 )

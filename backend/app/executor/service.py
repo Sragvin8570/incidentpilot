@@ -35,8 +35,9 @@ async def execute_ready_incident(
         )
         if incident is None:
             raise LookupError(f"Incident '{incident_id}' does not exist")
-        if incident.state != IncidentState.READY:
+        if incident.state not in {IncidentState.READY, IncidentState.APPROVED}:
             return False
+        initial_state = incident.state
         existing = await session.scalar(
             select(Execution).where(Execution.incident_id == incident_id)
         )
@@ -56,9 +57,14 @@ async def execute_ready_incident(
         execution_id = execution.id
 
     try:
-        if decision is None or decision.outcome != "READY":
-            raise ValueError("Incident has no READY policy decision")
-        action_id, target_kind, parameters = _execution_input(incident, decision)
+        expected_outcome = (
+            "READY" if initial_state == IncidentState.READY else "AWAITING_APPROVAL"
+        )
+        if decision is None or decision.outcome != expected_outcome:
+            raise ValueError("Incident has no matching execution policy decision")
+        action_id, target_kind, parameters = _execution_input(
+            incident, decision, allow_approved=initial_state == IncidentState.APPROVED
+        )
         manager = kubernetes_client or KubernetesExecutionClient()
         snapshot, snapshot_hash, patch = manager.prepare(
             action_id=action_id,
@@ -73,7 +79,7 @@ async def execute_ready_incident(
             status="FAILED",
             error=f"preflight_failed:{type(error).__name__}:{error}",
             logs=f"Preflight failed: {type(error).__name__}: {error}",
-            expected_state=IncidentState.READY,
+            expected_state=initial_state,
         )
         return False
 
@@ -89,7 +95,7 @@ async def execute_ready_incident(
         if (
             incident is None
             or execution is None
-            or incident.state != IncidentState.READY
+            or incident.state != initial_state
         ):
             return False
         execution.target_snapshot = snapshot
@@ -176,7 +182,10 @@ async def execute_ready_incident(
 
 
 def _execution_input(
-    incident: Incident, decision: Decision
+    incident: Incident,
+    decision: Decision,
+    *,
+    allow_approved: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     namespace = incident.namespace
     if namespace not in NAMESPACE_ENVIRONMENTS:
@@ -197,9 +206,12 @@ def _execution_input(
     action = catalog.actions.get(decision.recommended_action)
     if action is None:
         raise ValueError("Recommended action is not configured")
-    if action.risk_level == "high":
+    if action.risk_level == "high" and not allow_approved:
         raise ValueError("High-risk actions require approval")
-    if incident.target_kind in {"StatefulSet", "Node", "PersistentVolumeClaim"}:
+    if (
+        incident.target_kind in {"StatefulSet", "Node", "PersistentVolumeClaim"}
+        and not allow_approved
+    ):
         raise ValueError("This target kind requires approval")
     if incident.target_kind not in action.applies_to_kinds:
         raise ValueError("Configured action does not support the incident target")
@@ -251,7 +263,10 @@ async def _finish_failure(
                     IncidentState.ESCALATED,
                     detail={"stage": "execution", "error": error},
                 )
-            elif expected_state == IncidentState.READY:
+            elif expected_state in {
+                IncidentState.READY,
+                IncidentState.APPROVED,
+            }:
                 await transition_incident(
                     session,
                     incident,

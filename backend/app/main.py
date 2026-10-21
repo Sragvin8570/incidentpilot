@@ -11,6 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.approvals.api import router as approvals_router
+from app.auth.api import router as auth_router
+from app.auth.service import seed_approver_user
 from app.config import get_settings
 from app.enrichment.service import EnrichmentUnavailable, KubernetesResourceResolver
 from app.ingest.schemas import AlertmanagerResponse, AlertmanagerWebhook, IngestedAlert
@@ -53,6 +56,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.resolver = KubernetesResourceResolver()
     try:
+        await seed_approver_user(app.state.session_factory, settings)
         yield
     finally:
         await app.state.redis.aclose()
@@ -60,6 +64,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="IncidentPilot API", version="0.1.0", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(approvals_router)
 
 
 @app.get("/healthz", tags=["health"])
