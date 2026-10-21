@@ -1,6 +1,7 @@
 import asyncio
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.agent.service import (
@@ -15,6 +16,8 @@ from app.agent.tools.kubernetes import KubernetesEvidenceTools
 from app.agent.tools.prometheus import PrometheusEvidenceTools
 from app.agent.tools.runbooks import RunbookSearchTools
 from app.config import get_settings
+from app.db.models import Incident, IncidentState
+from app.executor.service import execute_ready_incident
 from app.runbooks.embeddings import LocalRunbookEmbedder
 from app.workers.celery_app import celery_app
 
@@ -58,9 +61,43 @@ async def _investigate_incident(incident_id: UUID) -> None:
             registry,
             session_factory,
         )
+        async with session_factory() as session:
+            incident = await session.scalar(
+                select(Incident).where(Incident.id == incident_id)
+            )
+            if incident is not None and incident.state == IncidentState.READY:
+                celery_app.send_task(
+                    "incidentpilot.execute_ready_incident",
+                    args=[str(incident_id)],
+                    task_id=f"execute-{incident_id}",
+                )
     finally:
         if runner is not None:
             await runner.client.close()
+        await engine.dispose()
+
+
+@celery_app.task(
+    name="incidentpilot.execute_ready_incident",
+    ignore_result=True,
+    acks_late=True,
+)
+def execute_ready_incident_task(incident_id: str) -> bool:
+    return asyncio.run(_execute_ready_incident(UUID(incident_id)))
+
+
+async def _execute_ready_incident(incident_id: UUID) -> bool:
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        return await execute_ready_incident(
+            incident_id,
+            session_factory,
+            executor_image=settings.executor_image,
+            timeout_seconds=settings.execution_timeout_seconds,
+        )
+    finally:
         await engine.dispose()
 
 

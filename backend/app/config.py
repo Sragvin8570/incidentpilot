@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     prometheus_url: str = "http://localhost:9090"
     alertmanager_webhook_token: SecretStr | None = None
     approval_expiry_minutes: int = Field(default=30, gt=0)
+    execution_timeout_seconds: int = Field(default=300, gt=0)
+    executor_image: str = "incidentpilot-executor:local"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[2] / ".env",

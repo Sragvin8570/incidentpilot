@@ -221,6 +221,46 @@ The verifier sends scoped test alerts for a failing Deployment rollout in
 each persisted Decision and removes only its temporary workload. It does not
 execute any recommendation.
 
+## Phase 6: bounded Kubernetes execution
+
+Only `READY` incidents are eligible for execution. `AWAITING_APPROVAL` and
+`APPROVED` incidents are not consumed or changed in this phase. Build and load
+the repository-owned Python/Kubernetes executor image into Kind, install one
+action-specific ServiceAccount and namespaced Role in each supported
+environment, then upgrade the database:
+
+```powershell
+docker build -t incidentpilot-executor:local -f backend\Dockerfile.executor backend
+kind load docker-image incidentpilot-executor:local --name incidentpilot
+.\.venv\Scripts\python.exe backend\scripts\install_executor_rbac.py
+.\.venv\Scripts\python.exe -m alembic -c backend\alembic.ini upgrade head
+```
+
+The installer only creates the configured action identities in `dev`,
+`staging`, and `prod`. Each Job runs as the account for its action; its Role is
+namespaced and grants only the target resource's required `get` and `patch`
+verbs. The Celery worker's Kubernetes identity must be able to read targets,
+perform server-side dry-run patches, create/watch Jobs, and retrieve their pod
+logs. Configure `EXECUTOR_IMAGE` and `EXECUTION_TIMEOUT_SECONDS` when using
+non-default values. Before creating a Job, the worker stores the target spec
+and SHA-256 hash and requires server-side dry-run success. An incident-unique
+Execution reservation prevents a second Job on retries. Job success advances
+`READY -> EXECUTING -> VERIFYING`; failures and timeouts are recorded with Job
+logs and escalated. A retry of an incident with an Execution row never creates
+another Job.
+
+Run the focused execution tests and the complete backend suite from
+`backend\` using `.venv\Scripts\python.exe -m pytest -q`. The live phase-6 gate
+is run only after the local Kind/Docker cluster is available; it must verify a
+failing `dev` Deployment rollback reaches ready pods on the previous revision,
+while a production StatefulSet remains `AWAITING_APPROVAL` without a Job.
+After building/loading the image, installing RBAC, and applying migrations, run
+the opt-in live gate with:
+
+```powershell
+.\.venv\Scripts\python.exe backend\scripts\verify_phase_6.py --confirm-live
+```
+
 To rerun only the phase 3 live investigation after phases 1 and 2 are already
 verified, use:
 

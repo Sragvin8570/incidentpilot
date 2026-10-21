@@ -22,7 +22,7 @@ ALLOWED_TRANSITIONS: dict[IncidentState | None, set[IncidentState]] = {
         IncidentState.READY,
         IncidentState.AWAITING_APPROVAL,
     },
-    IncidentState.READY: {IncidentState.EXECUTING},
+    IncidentState.READY: {IncidentState.EXECUTING, IncidentState.ESCALATED},
     IncidentState.AWAITING_APPROVAL: {
         IncidentState.APPROVED,
         IncidentState.REJECTED,
