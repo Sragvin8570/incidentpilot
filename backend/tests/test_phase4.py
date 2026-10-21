@@ -87,6 +87,11 @@ def run_scenario(scenario) -> None:
 def test_action_catalog_matches_runbook_ids_risks_and_enforces_schema() -> None:
     catalog = ActionCatalog.load()
     sections = load_runbook_sections(ROOT / "runbooks", catalog)
+    restart_sections = [
+        section
+        for section in sections
+        if section.action_id == "restart_workload"
+    ]
 
     assert set(catalog.actions) == {
         "expand_pvc",
@@ -96,6 +101,11 @@ def test_action_catalog_matches_runbook_ids_risks_and_enforces_schema() -> None:
         "scale_deployment",
     }
     assert len(sections) > len(catalog.actions)
+    assert restart_sections
+    assert restart_sections[0].metadata["applies_to_kinds"] == [
+        "Deployment",
+        "StatefulSet",
+    ]
     assert catalog.actions["restart_workload"].risk_level == "low"
     assert catalog.actions["expand_pvc"].risk_level == "high"
     assert (

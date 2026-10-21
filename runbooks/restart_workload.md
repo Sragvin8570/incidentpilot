@@ -4,7 +4,6 @@ title: Restart a crash-looping workload
 linked_action_id: restart_workload
 risk_level: low
 applies_to_kinds: [Deployment, StatefulSet]
-applies_to_kinds: [Deployment]
 ---
 
 # Restart a crash-looping workload

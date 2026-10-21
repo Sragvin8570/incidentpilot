@@ -350,6 +350,16 @@ def test_grounding_and_runbook_scores_require_successful_evidence() -> None:
         [success, unrelated],
         target_name="demo",
     ) == 1.0
+    assert grounding_score(
+        [{"evidence_ids": [str(success.id), str(failed.id)]}],
+        [success, failed],
+        target_name="demo",
+    ) == 0.0
+    assert grounding_score(
+        [{"evidence_ids": [str(unrelated.id)]}],
+        [unrelated],
+        target_name="demo",
+    ) == 0.0
     assert runbook_score("restart_workload", [search, second_search]) == 0.88
     assert runbook_score("restart_workload", [failed_search]) == 0.0
     assert runbook_score("unknown_action", [search]) == 0.0

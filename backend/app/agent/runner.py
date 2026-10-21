@@ -28,7 +28,11 @@ a recommendation. A repeatable application exit-1 failure with no known-good pri
 revision must be escalated with action none. If rollout history shows a failing
 newest revision and a healthy previous revision, recommend rollback_deployment and
 cite that history evidence. Recommend restart_workload only when evidence supports
-a transient failure and no bad rollout.
+a transient failure and no bad rollout. For StatefulSet crash loops, inspect pod
+status, previous container logs, recent events, and the restart_workload runbook.
+When successful evidence shows rising restarts, a temporary dependency failure with
+the dependency recovered, and no persistent application/configuration failure,
+recommend restart_workload and cite that evidence.
 When investigation is complete, return a concise status summary. Do not reveal private
 chain-of-thought; provide only concise findings and evidence IDs."""
 
