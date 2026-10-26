@@ -97,6 +97,7 @@ async def run_investigation(
                     catalog=catalog,
                     deadline=result.deadline,
                     rate_limit_retries=result.rate_limit_retries,
+                    session_factory=session_factory,
                 )
                 if rca.recommended_action != "none":
                     action_error = catalog.validate_recommendation(
@@ -303,7 +304,7 @@ def create_agent_runner(
     client = AsyncOpenAI(
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=settings.llm_base_url,
-        timeout=300,
+        timeout=settings.investigation_timeout_seconds,
         max_retries=1,
     )
     return AgentRunner(

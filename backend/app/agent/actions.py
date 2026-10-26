@@ -25,6 +25,7 @@ class ActionDefinition(BaseModel):
     recovery_threshold: Literal[
         "desired_replicas", "memory_limit_bytes", "requested_storage_bytes"
     ]
+    recovery_threshold_factor: float = Field(default=1.0, gt=0, le=1)
     recovery_operator: Literal[">=", "<="]
 
 

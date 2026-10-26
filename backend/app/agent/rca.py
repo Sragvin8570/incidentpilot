@@ -7,6 +7,7 @@ from uuid import UUID
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.actions import ActionCatalog
 from app.agent.rate_limits import (
@@ -15,6 +16,7 @@ from app.agent.rate_limits import (
     create_with_rate_limit_retry,
 )
 from app.agent.sanitization import sanitize_evidence
+from app.agent.usage import record_llm_call
 from app.db.models import Evidence
 
 
@@ -71,6 +73,7 @@ async def generate_rca(
     catalog: ActionCatalog,
     deadline: float | None = None,
     rate_limit_retries: int = 0,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> RCAOutput:
     evidence_data = [
         {
@@ -146,6 +149,12 @@ async def generate_rca(
                     loop=loop,
                     budget=retry_budget,
                 )
+                if session_factory is not None:
+                    await record_llm_call(
+                        session_factory,
+                        UUID(str(incident_context["incident_id"])),
+                        response,
+                    )
             except RateLimitEscalation as error:
                 raise RCAValidationError(str(error)) from error
             message = response.choices[0].message

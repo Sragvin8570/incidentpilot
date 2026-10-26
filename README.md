@@ -332,6 +332,23 @@ the failing revision during stabilization and must escalate with workload health
 and change persistence failures. It removes only its named test Deployments and
 executor Jobs.
 
+## Phase 9: evaluation harness
+
+Run the scenario matrix with the evaluation model from `docs/spec-decisions.md`.
+Each successful row records expected-cause concept matches and a reason in
+`rca_reason`; provider failures are `INVALID` and excluded from summary metrics.
+LLM calls count successful model responses (investigation/tool turns and RCA
+retries), not Kubernetes tool invocations. Re-running with `--resume` skips
+only `VALID` scenario/run pairs from the same model/config CSV.
+
+```powershell
+.\.venv\Scripts\python.exe eval\run.py --scenario all --runs 3 --config full --model gemini-3.8-flash
+.\.venv\Scripts\python.exe eval\run.py --scenario all --runs 3 --config full --model gemini-3.8-flash --resume
+.\.venv\Scripts\python.exe eval\run.py --scenario all --runs 3 --config no_tools --model gemini-3.8-flash
+.\.venv\Scripts\python.exe eval\run.py --scenario all --runs 3 --config no_verification --model gemini-3.8-flash
+.\.venv\Scripts\python.exe eval\summarize.py
+```
+
 ## Security and safety
 
 - Do not commit credentials or `.env`.

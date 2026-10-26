@@ -2,10 +2,11 @@ id: increase_memory_limit
 risk_level: medium
 applies_to_kinds:
   - Deployment
-stabilization_seconds: 30
+stabilization_seconds: 300
 alert_grace_seconds: 40
-recovery_promql: max(container_memory_working_set_bytes{namespace=__NAMESPACE__,pod=~__POD_REGEX__,container=__CONTAINER__})
+recovery_promql: max_over_time(container_memory_working_set_bytes{namespace=__NAMESPACE__,pod=~__POD_REGEX__,container=__CONTAINER__}[5m])
 recovery_threshold: memory_limit_bytes
+recovery_threshold_factor: 0.9
 recovery_operator: "<="
 parameters:
   type: object

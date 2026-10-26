@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent.sanitization import sanitize_evidence
+from app.agent.usage import record_llm_call
 from app.agent.rate_limits import (
     RateLimitEscalation,
     RateLimitRetryBudget,
@@ -128,6 +129,11 @@ class AgentRunner:
                     deadline=deadline,
                     loop=loop,
                     budget=retry_budget,
+                )
+                await record_llm_call(
+                    self.session_factory,
+                    incident_id,
+                    response,
                 )
             except RateLimitEscalation as error:
                 return AgentRunResult(

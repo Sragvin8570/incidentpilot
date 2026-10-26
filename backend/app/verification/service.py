@@ -433,6 +433,7 @@ async def verify_incident(
             parameters=parameters,
         )
         threshold = recovery_threshold(action, execution, parameters)
+        threshold *= action.recovery_threshold_factor
         values = await prometheus_client.query(query)
         check_results.append(
             evaluate_metric_recovery(values, threshold, action.recovery_operator)

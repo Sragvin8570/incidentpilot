@@ -1,0 +1,2 @@
+timestamp,config,scenario,run,model,expected_action,action,action_correct,expected_final_state,final_state,final_state_correct,rca_correct,rca_reason,hallucinated_claims,time_to_final_state_seconds,llm_calls,llm_prompt_tokens,llm_completion_tokens,false_resolution,status,invalid_reason,error
+2026-10-23T20:37:35.802775+00:00,full,bad_rollout_dev,1,gemini-3.8-flash,rollback_deployment,,False,RESOLVED,ESCALATED,False,False,RCA unavailable: investigation timed out before completion,0,302.524,1,2403,256,False,INVALID,investigation_timeout,investigation_timeout
