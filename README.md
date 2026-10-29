@@ -222,6 +222,42 @@ its Job succeeds, a viewer receives HTTP 403 when attempting approval, and a
 second production StatefulSet is rejected and escalated without a Job. It
 cleans up only its uniquely named workloads, Jobs, and temporary viewer.
 
+## Phase 7b: React dashboard (frontend)
+
+The React/TypeScript dashboard provides operational visibility into autonomous
+incident handling and human-in-the-loop approval workflows:
+
+1. **Authentication**: Login screen with JWT token issuance (`POST /api/v1/auth/login`)
+   and role-based authorization (`viewer`, `approver`, `admin`).
+2. **Operations Dashboard**: Real-time KPI statistics (active, awaiting approval,
+   executing/verifying, resolved, escalated), cluster readiness health monitor,
+   pending approval quick-action alerts, and recent incidents.
+3. **Incidents Catalog**: Filterable table with state, severity, and text search,
+   pagination, and direct links to full incident inspection.
+4. **Incident Deep-Dive**: Visual pipeline stage tracker (Intake → Enrichment →
+   Investigation → RCA → Policy Decision → Execution → Verification → Outcome),
+   tabbed views for Root Cause Analysis (claims & citations), Policy Decision
+   (confidence scores breakdown & risk evaluation), Remediation Job (pod logs &
+   target hashes), Closed-Loop Verification (health checks & effectiveness score),
+   read-only Evidence viewer, and an Audit Trail timeline.
+5. **Human Approvals**: Dedicated approvals queue with countdown timers before expiry,
+   one-click execution approval, and rejection modal with required comment audit logging.
+
+To run the dashboard during development:
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+To build for production:
+
+```sh
+cd frontend
+npm run build
+```
+
 The earlier transient test was not a real dependency outage: its BusyBox
 command printed a dependency-failure message, exited with status 42 for its
 first three starts, then exited successfully on the fourth. It did not connect

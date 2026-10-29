@@ -1,31 +1,63 @@
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { Layout } from "./components/Layout";
+import { LoginPage } from "./pages/LoginPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { IncidentsPage } from "./pages/IncidentsPage";
+import { IncidentDetailPage } from "./pages/IncidentDetailPage";
+import { ApprovalsPage } from "./pages/ApprovalsPage";
+
 export default function App() {
   return (
-    <main className="shell">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="IncidentPilot home">
-          <span className="brand-mark">IP</span>
-          <span>IncidentPilot</span>
-        </a>
-        <span className="phase">Foundation · Phase 1</span>
-      </header>
-      <section className="welcome">
-        <p className="eyebrow">KUBERNETES INCIDENT RESPONSE</p>
-        <h1>From alert to verified recovery.</h1>
-        <p className="intro">
-          IncidentPilot is being built phase by phase. The initial foundation
-          connects local services and a demo workload; incident handling will
-          appear here as those phases are completed.
-        </p>
-        <div className="status-card">
-          <span className="status-dot" />
-          <div>
-            <strong>Foundation workspace</strong>
-            <p>Incident intake and monitoring integration are not configured yet.</p>
-          </div>
-        </div>
-      </section>
-      <footer>Evidence first. Safe actions. Verified outcomes.</footer>
-    </main>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <DashboardPage />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incidents"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <IncidentsPage />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incidents/:id"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <IncidentDetailPage />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/approvals"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <ApprovalsPage />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
-

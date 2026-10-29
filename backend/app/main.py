@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from app.approvals.api import router as approvals_router
 from app.auth.api import router as auth_router
+from app.incidents.api import router as incidents_router
 from app.auth.service import seed_approver_user
 from app.config import get_settings
 from app.enrichment.service import EnrichmentUnavailable, KubernetesResourceResolver
@@ -66,6 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="IncidentPilot API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(approvals_router)
+app.include_router(incidents_router)
 
 
 @app.get("/healthz", tags=["health"])
