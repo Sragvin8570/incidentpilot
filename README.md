@@ -18,7 +18,8 @@ confidence weights, threshold, and risk-routing rules are configured in
 
 Use Linux/macOS, or Windows with WSL2 and VS Code's WSL extension. Install Docker,
 Kind, kubectl, Helm, Python 3.12, Node.js 20+, and make. Start Docker before using
-the local services or cluster.
+the local services or cluster. See [docker-setup.md](docker-setup.md) for full Docker
+configuration, architecture details, and troubleshooting.
 
 ## Local development
 
