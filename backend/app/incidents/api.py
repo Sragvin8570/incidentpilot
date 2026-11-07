@@ -182,6 +182,8 @@ async def get_incident_detail(
                 recommended_action=d.recommended_action,
                 outcome=d.outcome,
                 confidence=d.confidence,
+                confidence_lo=d.confidence_lo,
+                confidence_hi=d.confidence_hi,
                 llm_confidence=d.llm_confidence,
                 grounding_score=d.grounding_score,
                 claim_grounding=d.claim_grounding or [],

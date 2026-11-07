@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nyaya-mitra-backend
+  namespace: dev
+  labels:
+    app: nyaya-mitra-backend
+    incidentpilot.io/environment: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nyaya-mitra-backend
+  template:
+    metadata:
+      labels:
+        app: nyaya-mitra-backend
+        incidentpilot.io/environment: dev
+    spec:
+      containers:
+        - name: nyaya-mitra-backend
+          image: nyaya-mitra-backend:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+

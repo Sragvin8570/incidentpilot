@@ -80,6 +80,8 @@ export interface DecisionDetail {
   recommended_action: string;
   outcome: string;
   confidence: number;
+  confidence_lo?: number | null;
+  confidence_hi?: number | null;
   llm_confidence: number;
   grounding_score: number;
   claim_grounding: Array<{

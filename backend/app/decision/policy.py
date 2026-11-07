@@ -71,6 +71,8 @@ class DecisionResult:
     risk_reason: str
     outcome: str
     reason: str
+    confidence_lo: float | None = None
+    confidence_hi: float | None = None
 
 
 class DecisionPolicy:
@@ -148,6 +150,27 @@ class DecisionPolicy:
             outcome = "READY"
             reason = selected_rule.reason
 
+        confidence_lo: float | None = None
+        confidence_hi: float | None = None
+        try:
+            from app.ml.predictor import ConfidencePredictor
+
+            predictor = ConfidencePredictor.load()
+            pi = predictor.predict(
+                llm_confidence=llm_confidence,
+                grounding_score=grounding,
+                runbook_score=runbook,
+                confidence=confidence,
+                risk_score=selected_rule.score,
+                environment=normalized_environment,
+                target_kind=attributes['target_kind'],
+                outcome=outcome,
+            )
+            confidence_lo = round(pi.lo, 4)
+            confidence_hi = round(pi.hi, 4)
+        except Exception:
+            pass
+
         return DecisionResult(
             llm_confidence=llm_confidence,
             grounding_score=grounding,
@@ -158,6 +181,8 @@ class DecisionPolicy:
             risk_reason=selected_rule.reason,
             outcome=outcome,
             reason=reason,
+            confidence_lo=confidence_lo,
+            confidence_hi=confidence_hi,
         )
 
 

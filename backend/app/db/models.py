@@ -151,6 +151,8 @@ class Decision(Base):
     recommended_action: Mapped[str] = mapped_column(String(128))
     outcome: Mapped[str] = mapped_column(String(32))
     confidence: Mapped[float] = mapped_column()
+    confidence_lo: Mapped[float | None] = mapped_column(nullable=True)
+    confidence_hi: Mapped[float | None] = mapped_column(nullable=True)
     llm_confidence: Mapped[float] = mapped_column()
     grounding_score: Mapped[float] = mapped_column()
     claim_grounding: Mapped[list[dict]] = mapped_column(

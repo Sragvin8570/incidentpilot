@@ -62,6 +62,8 @@ class DecisionDetail(BaseModel):
     recommended_action: str
     outcome: str
     confidence: float
+    confidence_lo: float | None = None
+    confidence_hi: float | None = None
     llm_confidence: float
     grounding_score: float
     claim_grounding: list[dict[str, Any]]

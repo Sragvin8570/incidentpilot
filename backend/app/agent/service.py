@@ -143,6 +143,8 @@ async def run_investigation(
                             recommended_action=rca.recommended_action,
                             outcome=decision_result.outcome,
                             confidence=decision_result.confidence,
+                            confidence_lo=decision_result.confidence_lo,
+                            confidence_hi=decision_result.confidence_hi,
                             llm_confidence=decision_result.llm_confidence,
                             grounding_score=decision_result.grounding_score,
                             claim_grounding=decision_result.claim_grounding,
